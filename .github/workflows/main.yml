@@ -154,29 +154,22 @@ jobs:
           docker-compose down
           docker-compose pull
           
-          :: 1. Start Vault & Mongo
+          :: 1. Create Dummy Files (Vital so Docker doesn't make directories)
+          type nul > role_id
+          type nul > secret_id
+          
+          :: 2. Start Vault & DB
           docker-compose up -d vault mongodb
+          
           echo Waiting for Vault...
           ping 127.0.0.1 -n 16 > nul
           
-          :: 2. Configure Vault (Generates role_id/secret_id files)
+          :: 3. Run Setup (This overwrites role_id and secret_id with REAL keys)
           set VAULT_ADDR=http://127.0.0.1:8200
           call setup-vault.bat
           
-          :: 3. Start App & Agent
+          :: 4. Start Agent (It will now mount the REAL keys automatically)
           docker-compose up -d --build backend frontend vault-agent
-          
-          :: 4. INJECT CREDENTIALS & RESTART AGENT
-          echo Injecting Credentials into Vault Agent...
-          docker cp role_id vault-agent:/vault/config/role_id
-          docker cp secret_id vault-agent:/vault/config/secret_id
-          
-          :: Restart Agent to pick up the new files and login
-          docker restart vault-agent
-          
-          :: Cleanup sensitive files from runner
-          del role_id
-          del secret_id
 
       # --- 9. CLEANUP ---
       - name: Cleanup

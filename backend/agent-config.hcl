@@ -1,25 +1,30 @@
-vault {
-  address = "http://vault:8200"
-}
+pid_file = "/vault/pid"
 
 auto_auth {
   method "approle" {
     mount_path = "auth/approle"
     config = {
-      # These files are mounted from ./backend on the host
-      role_id_file_path = "/app/auth/role_id"
-      secret_id_file_path = "/app/auth/secret_id"
+      role_id_file_path = "/vault/config/role_id"      # <--- MATCHES MOUNT
+      secret_id_file_path = "/vault/config/secret_id"  # <--- MATCHES MOUNT
       remove_secret_id_file_after_reading = false
+    }
+  }
+
+  sink "file" {
+    config = {
+      path = "/vault/secrets/.vault-token"
     }
   }
 }
 
 template {
-  contents = <<EOH
-  {
-    "username": "{{ with secret "database/creds/web-role" }}{{ .Data.username }}{{ end }}",
-    "password": "{{ with secret "database/creds/web-role" }}{{ .Data.password }}{{ end }}"
-  }
-  EOH
-  destination = "/app/secrets/mongodb-creds.json"
+  destination = "/vault/secrets/db_creds.json"
+  contents = <<EOT
+{{ with secret "database/creds/web-role" }}
+{
+  "username": "{{ .Data.username }}",
+  "password": "{{ .Data.password }}"
+}
+{{ end }}
+EOT
 }

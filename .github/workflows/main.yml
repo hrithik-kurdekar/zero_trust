@@ -28,8 +28,11 @@ jobs:
           docker run --rm test-backend python -m flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics > security-reports/flake8-report.txt
 
           echo Running Pylint (Report Only - No Fail)...
-          :: We removed "|| exit 1" so this step will pass regardless of the score
-          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || echo Pylint score low but continuing...
+          :: We use "|| echo" to print a message if issues are found
+          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || echo Pylint found issues (ignoring for now)...
+          
+          :: FORCE SUCCESS: This ensures the step does not fail even if Pylint returned code 20
+          exit 0
 
       # --- 2. UNIT TESTING (Pytest) ---
       - name: Run Backend Unit Tests

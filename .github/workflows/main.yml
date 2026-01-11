@@ -94,49 +94,41 @@ jobs:
           docker build -t %DOCKER_USER%/zero-trust-backend:latest ./backend
           docker build -t %DOCKER_USER%/zero-trust-frontend:latest ./frontend
 
-      # --- 6. TRIVY IMAGE SCAN (Split: Report + Gate) ---
+      # --- 6. TRIVY IMAGE SCAN (Using your working syntax) ---
       
       # 6a. Backend Image
-      - name: Trivy Scan Backend - Report
+      - name: Trivy Scan Backend
         shell: cmd
         env:
           DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          :: FIX: Map Windows Pipe (Host) -> /var/run/docker.sock (Container)
-          docker run --rm -v //./pipe/docker_engine:/var/run/docker.sock -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
+          :: Report
+          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
             aquasec/trivy image --format template --template "@/contrib/html.tpl" ^
             --output /reports/backend-image-report.html --exit-code 0 ^
             %DOCKER_USER%/zero-trust-backend:latest
-
-      - name: Trivy Scan Backend - Gate
-        shell: cmd
-        env:
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          docker run --rm -v //./pipe/docker_engine:/var/run/docker.sock ^
+          
+          :: Gate
+          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine ^
             aquasec/trivy image --exit-code 1 --severity CRITICAL ^
             %DOCKER_USER%/zero-trust-backend:latest
 
       # 6b. Frontend Image
-      - name: Trivy Scan Frontend - Report
+      - name: Trivy Scan Frontend
         shell: cmd
         env:
           DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          docker run --rm -v //./pipe/docker_engine:/var/run/docker.sock -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
+          :: Report
+          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
             aquasec/trivy image --format template --template "@/contrib/html.tpl" ^
             --output /reports/frontend-image-report.html --exit-code 0 ^
             %DOCKER_USER%/zero-trust-frontend:latest
-
-      - name: Trivy Scan Frontend - Gate
-        shell: cmd
-        env:
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          docker run --rm -v //./pipe/docker_engine:/var/run/docker.sock ^
+            
+          :: Gate
+          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine ^
             aquasec/trivy image --exit-code 1 --severity CRITICAL ^
             %DOCKER_USER%/zero-trust-frontend:latest
-
       # --- 7. UPLOAD ARTIFACTS ---
       - name: Upload Security Reports
         if: always()

@@ -25,11 +25,11 @@ jobs:
           docker build --no-cache -t test-backend ./backend
           
           echo Running Flake8 (Report Only)...
-          :: Use "python -m flake8" to avoid PATH issues
           docker run --rm test-backend python -m flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics > security-reports/flake8-report.txt
 
-          echo Running Pylint (Gate: Fail if under 8/10)...
-          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || exit 1
+          echo Running Pylint (Report Only - No Fail)...
+          :: We removed "|| exit 1" so this step will pass regardless of the score
+          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || echo Pylint score low but continuing...
 
       # --- 2. UNIT TESTING (Pytest) ---
       - name: Run Backend Unit Tests

@@ -154,7 +154,11 @@ jobs:
           docker-compose down
           docker-compose pull
           
-          :: 1. Create Dummy Files (Vital so Docker doesn't make directories)
+          :: CRITICAL SAFETY: Remove old directories if they exist
+          if exist role_id\ ( rmdir /s /q role_id )
+          if exist secret_id\ ( rmdir /s /q secret_id )
+          
+          :: 1. Create Dummy Files (Vital so Docker mounts them as files)
           type nul > role_id
           type nul > secret_id
           
@@ -164,11 +168,11 @@ jobs:
           echo Waiting for Vault...
           ping 127.0.0.1 -n 16 > nul
           
-          :: 3. Run Setup (This overwrites role_id and secret_id with REAL keys)
+          :: 3. Run Setup (Populates role_id and secret_id)
           set VAULT_ADDR=http://127.0.0.1:8200
           call setup-vault.bat
           
-          :: 4. Start Agent (It will now mount the REAL keys automatically)
+          :: 4. Start Agent (It reads the populated files)
           docker-compose up -d --build backend frontend vault-agent
 
       # --- 9. CLEANUP ---

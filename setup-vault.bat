@@ -52,10 +52,14 @@ docker exec -e VAULT_TOKEN=root-token vault vault write auth/approle/role/web-ap
     token_ttl=1h ^
     token_max_ttl=4h
 
-echo [7/8] Generating Login Credentials (FIXED PATHS)...
-:: FIX: Added "/role-id" to the end of the path
+echo [7/8] Generating Login Credentials (ONE-TIME USE)...
+:: 1. Generate Role ID
 docker exec -e VAULT_TOKEN=root-token vault sh -c "vault read -field=role_id auth/approle/role/web-app-role/role-id > /tmp/role_id"
-docker exec -e VAULT_TOKEN=root-token vault sh -c "vault write -f -field=secret_id auth/approle/role/web-app-role/secret-id > /tmp/secret_id"
+
+:: 2. Generate Secret ID (THE SECURITY FIX)
+::    num_uses=1 -> Self-destructs after Agent logs in
+::    ttl=5m     -> Expires in 5 mins if unused
+docker exec -e VAULT_TOKEN=root-token vault sh -c "vault write -f -field=secret_id auth/approle/role/web-app-role/secret-id num_uses=1 ttl=5m > /tmp/secret_id"
 
 :: Copy files OUT to the Host
 docker cp vault:/tmp/role_id role_id
@@ -72,8 +76,6 @@ for %%A in (secret_id) do if %%~zA==0 (
 )
 
 echo      SUCCESS: Credentials generated.
-echo      Role ID size: 
-for %%A in (role_id) do echo %%~zA bytes
 echo ==============================================
 echo      SETUP COMPLETE
 echo ==============================================

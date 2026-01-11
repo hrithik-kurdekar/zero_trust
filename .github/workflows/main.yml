@@ -17,17 +17,19 @@ jobs:
         shell: cmd
         run: if not exist "security-reports" mkdir "security-reports"
 
-      # --- 1. STATIC CODE ANALYSIS (Lint & Flake8) ---
+     # --- 1. STATIC CODE ANALYSIS (Lint & Flake8) ---
       - name: Static Code Analysis
         shell: cmd
         run: |
-          docker build -t test-backend ./backend
+          :: Build the image with --no-cache to ensure new requirements are installed
+          docker build --no-cache -t test-backend ./backend
           
           echo Running Flake8 (Report Only)...
-          docker run --rm test-backend flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics > security-reports/flake8-report.txt
+          :: Use "python -m flake8" to avoid PATH issues
+          docker run --rm test-backend python -m flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics > security-reports/flake8-report.txt
 
           echo Running Pylint (Gate: Fail if under 8/10)...
-          docker run --rm test-backend pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || exit 1
+          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || exit 1
 
       # --- 2. UNIT TESTING (Pytest) ---
       - name: Run Backend Unit Tests

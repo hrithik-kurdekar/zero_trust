@@ -154,26 +154,35 @@ jobs:
           docker-compose down
           docker-compose pull
           
-          :: CRITICAL SAFETY: Remove old directories if they exist
+          :: SAFETY 1: Remove old directories (Prevents crashes)
           if exist role_id\ ( rmdir /s /q role_id )
           if exist secret_id\ ( rmdir /s /q secret_id )
           
-          :: 1. Create Dummy Files (Vital so Docker mounts them as files)
+          :: SAFETY 2: Create Dummy Files (Vital for Mounts)
           type nul > role_id
           type nul > secret_id
           
-          :: 2. Start Vault & DB
+          :: 1. Start Vault & DB
           docker-compose up -d vault mongodb
           
-          echo Waiting for Vault...
+          echo Waiting for Vault to initialize...
           ping 127.0.0.1 -n 16 > nul
           
-          :: 3. Run Setup (Populates role_id and secret_id)
+          :: 2. Generate One-Time Secrets
           set VAULT_ADDR=http://127.0.0.1:8200
           call setup-vault.bat
           
-          :: 4. Start Agent (It reads the populated files)
+          :: 3. Start Agent (Agent consumes the One-Time Secrets)
           docker-compose up -d --build backend frontend vault-agent
+          
+          echo Waiting for Agent to Login...
+          ping 127.0.0.1 -n 6 > nul
+          
+          :: SAFETY 3: DELETE SECRETS FROM DISK IMMEDIATELY
+          :: The Agent has them in RAM now. The files are liability.
+          if exist role_id del role_id
+          if exist secret_id del secret_id
+          echo [SECURE] Credentials wiped from host disk.
 
       # --- 9. CLEANUP ---
       - name: Cleanup
@@ -183,3 +192,5 @@ jobs:
           if exist "security-reports" rd /s /q "security-reports"
           if exist "backend.tar" del backend.tar
           if exist "frontend.tar" del frontend.tar
+          if exist role_id del role_id
+          if exist secret_id del secret_id

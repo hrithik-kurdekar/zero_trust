@@ -1,3 +1,9 @@
 fastapi
 uvicorn
 motor
+pytest
+pytest-cov
+httpx
+requests
+pylint
+flake8

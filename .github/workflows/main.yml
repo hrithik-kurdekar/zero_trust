@@ -17,28 +17,25 @@ jobs:
         shell: cmd
         run: if not exist "security-reports" mkdir "security-reports"
 
-     # --- 1. STATIC CODE ANALYSIS (Lint & Flake8) ---
+      # --- 1. STATIC CODE ANALYSIS (Lint & Flake8) ---
       - name: Static Code Analysis
         shell: cmd
         run: |
-          :: Build the image with --no-cache to ensure new requirements are installed
           docker build --no-cache -t test-backend ./backend
           
-          echo Running Flake8 (Report Only)...
+          echo Running Flake8...
           docker run --rm test-backend python -m flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics > security-reports/flake8-report.txt
 
-          echo Running Pylint (Report Only - No Fail)...
-          :: We use "|| echo" to print a message if issues are found
-          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || echo Pylint found issues (ignoring for now)...
-          
-          :: FORCE SUCCESS: This ensures the step does not fail even if Pylint returned code 20
+          echo Running Pylint...
+          docker run --rm test-backend python -m pylint --fail-under=8.0 main.py > security-reports/pylint-report.txt || echo Pylint found issues...
           exit 0
 
-      # --- 2. UNIT TESTING (Pytest) ---
+      # --- 2. UNIT TESTING & COVERAGE (Pytest) ---
       - name: Run Backend Unit Tests
         shell: cmd
         run: |
-          docker run --rm -v "%GITHUB_WORKSPACE%\security-reports:/app/reports" test-backend sh -c "pytest --cov=. --cov-report=html:/app/reports/coverage-report.html"
+          :: Generates coverage.xml (for SonarQube) AND coverage-report.html (for Artifacts)
+          docker run --rm -v "%GITHUB_WORKSPACE%\security-reports:/app/reports" test-backend sh -c "pytest --cov=. --cov-report=xml:/app/reports/coverage.xml --cov-report=html:/app/reports/coverage-report.html"
 
       # --- 3. SONARQUBE SCAN ---
       - name: SonarQube Scan
@@ -46,89 +43,92 @@ jobs:
         env:
           SONAR_TOKEN_VAR: ${{ secrets.SONAR_TOKEN }}
         run: |
+          :: We mount the 'security-reports' folder so Sonar can find coverage.xml
           docker run --rm ^
             -e SONAR_HOST_URL="http://host.docker.internal:9000" ^
             -v "%GITHUB_WORKSPACE%:/usr/src" ^
+            -v "%GITHUB_WORKSPACE%\security-reports:/usr/src/security-reports" ^
             sonarsource/sonar-scanner-cli ^
             -Dsonar.projectKey=zero-trust-app ^
             -Dsonar.token="%SONAR_TOKEN_VAR%" ^
             -Dsonar.sources=. ^
-            -Dsonar.exclusions=**/node_modules/**,**/.git/**,**/__pycache__/**,**/tests/** ^
+            -Dsonar.exclusions=**/node_modules/**,**/.git/**,**/__pycache__/**,**/tests/**,**/frontend/** ^
             -Dsonar.python.coverage.reportPaths=security-reports/coverage.xml ^
             -Dsonar.qualitygate.wait=true
 
-      # --- 4. TRIVY FILESYSTEM SCAN (Split: Report + Gate) ---
-      - name: Trivy FS Scan - Report Generation
+          echo ### SonarQube Analysis >> "%GITHUB_STEP_SUMMARY%"
+          echo View report at: [Local SonarQube Dashboard](http://localhost:9000/dashboard?id=zero-trust-app) >> "%GITHUB_STEP_SUMMARY%"
+
+      # --- 4. TRIVY FILESYSTEM SCAN ---
+      - name: Trivy FS Scan (Report & Gate)
         shell: cmd
         run: |
+          :: Report
           docker run --rm ^
             -v "%GITHUB_WORKSPACE%:/usr/src" ^
             -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
-            -w /usr/src ^
             aquasec/trivy fs --format template --template "@/contrib/html.tpl" ^
             --output /reports/fs-report.html --exit-code 0 ^
-            --skip-dirs .git --skip-dirs .github --skip-dirs node_modules --skip-dirs __pycache__ ^
-            .
+            --skip-dirs .git --skip-dirs .github --skip-dirs node_modules .
 
-      - name: Trivy FS Scan - Quality Gate (Fail on Critical)
-        shell: cmd
-        run: |
+          :: Gate (Fail on Critical)
           docker run --rm ^
             -v "%GITHUB_WORKSPACE%:/usr/src" ^
             aquasec/trivy fs --exit-code 1 --severity CRITICAL ^
-            --skip-dirs .git --skip-dirs .github --skip-dirs node_modules --skip-dirs __pycache__ ^
-            .
+            --skip-dirs .git --skip-dirs .github --skip-dirs node_modules .
 
-      # --- 5. DOCKER LOGIN & BUILD ---
+      # --- 5. BUILD & SAVE IMAGES (For Reliable Scanning) ---
       - name: Docker Login
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build Images
+      - name: Build and Save Images
         shell: cmd
         env:
           DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
+          echo Building...
           docker build -t %DOCKER_USER%/zero-trust-backend:latest ./backend
           docker build -t %DOCKER_USER%/zero-trust-frontend:latest ./frontend
+          
+          echo Saving to TAR (Fixes Trivy Socket Issues)...
+          docker save -o backend.tar %DOCKER_USER%/zero-trust-backend:latest
+          docker save -o frontend.tar %DOCKER_USER%/zero-trust-frontend:latest
 
-      # --- 6. TRIVY IMAGE SCAN (Using your working syntax) ---
+      # --- 6. TRIVY IMAGE SCAN (File-Based) ---
       
       # 6a. Backend Image
       - name: Trivy Scan Backend
         shell: cmd
-        env:
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           :: Report
-          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
-            aquasec/trivy image --format template --template "@/contrib/html.tpl" ^
-            --output /reports/backend-image-report.html --exit-code 0 ^
-            %DOCKER_USER%/zero-trust-backend:latest
-          
+          docker run --rm -v "%GITHUB_WORKSPACE%:/workspace" -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
+            aquasec/trivy image --input /workspace/backend.tar ^
+            --format template --template "@/contrib/html.tpl" ^
+            --output /reports/backend-image-report.html --exit-code 0
+
           :: Gate
-          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine ^
-            aquasec/trivy image --exit-code 1 --severity CRITICAL ^
-            %DOCKER_USER%/zero-trust-backend:latest
+          docker run --rm -v "%GITHUB_WORKSPACE%:/workspace" ^
+            aquasec/trivy image --input /workspace/backend.tar ^
+            --exit-code 1 --severity CRITICAL
 
       # 6b. Frontend Image
       - name: Trivy Scan Frontend
         shell: cmd
-        env:
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           :: Report
-          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
-            aquasec/trivy image --format template --template "@/contrib/html.tpl" ^
-            --output /reports/frontend-image-report.html --exit-code 0 ^
-            %DOCKER_USER%/zero-trust-frontend:latest
-            
+          docker run --rm -v "%GITHUB_WORKSPACE%:/workspace" -v "%GITHUB_WORKSPACE%\security-reports:/reports" ^
+            aquasec/trivy image --input /workspace/frontend.tar ^
+            --format template --template "@/contrib/html.tpl" ^
+            --output /reports/frontend-image-report.html --exit-code 0
+
           :: Gate
-          docker run --rm -v //./pipe/docker_engine://./pipe/docker_engine ^
-            aquasec/trivy image --exit-code 1 --severity CRITICAL ^
-            %DOCKER_USER%/zero-trust-frontend:latest
+          docker run --rm -v "%GITHUB_WORKSPACE%:/workspace" ^
+            aquasec/trivy image --input /workspace/frontend.tar ^
+            --exit-code 1 --severity CRITICAL
+
       # --- 7. UPLOAD ARTIFACTS ---
       - name: Upload Security Reports
         if: always()
@@ -138,6 +138,7 @@ jobs:
           path: |
             security-reports/*.html
             security-reports/*.txt
+            security-reports/coverage.xml
 
       # --- 8. PUSH & DEPLOY ---
       - name: Push & Deploy
@@ -159,4 +160,7 @@ jobs:
       - name: Cleanup
         if: always()
         shell: cmd
-        run: if exist "security-reports" rd /s /q "security-reports"
+        run: |
+          if exist "security-reports" rd /s /q "security-reports"
+          if exist "backend.tar" del backend.tar
+          if exist "frontend.tar" del frontend.tar

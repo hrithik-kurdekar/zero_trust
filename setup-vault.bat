@@ -52,15 +52,18 @@ docker exec -e VAULT_TOKEN=root-token vault vault write auth/approle/role/web-ap
     token_ttl=1h ^
     token_max_ttl=4h
 
-echo [7/8] Generating Login Credentials...
-:: We use -T to disable TTY so output redirection works correctly in CI
-docker exec -T -e VAULT_TOKEN=root-token vault vault read -field=role_id auth/approle/role/web-app-role > role_id
-docker exec -T -e VAULT_TOKEN=root-token vault vault write -f -field=secret_id auth/approle/role/web-app-role/secret-id > secret_id
+echo [7/8] Generating Login Credentials (The Reliable Way)...
+:: 1. Generate files INSIDE the container (Linux)
+docker exec -e VAULT_TOKEN=root-token vault sh -c "vault read -field=role_id auth/approle/role/web-app-role > /tmp/role_id"
+docker exec -e VAULT_TOKEN=root-token vault sh -c "vault write -f -field=secret_id auth/approle/role/web-app-role/secret-id > /tmp/secret_id"
+
+:: 2. Copy files OUT to the Host
+docker cp vault:/tmp/role_id role_id
+docker cp vault:/tmp/secret_id secret_id
 
 echo [8/8] Verifying Credentials...
 for %%A in (role_id) do if %%~zA==0 (
     echo [ERROR] role_id file is EMPTY! Vault command failed.
-    type role_id
     exit /b 1
 )
 for %%A in (secret_id) do if %%~zA==0 (

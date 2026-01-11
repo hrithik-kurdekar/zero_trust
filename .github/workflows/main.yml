@@ -142,7 +142,7 @@ jobs:
       #       security-reports/*.txt
       #       security-reports/coverage.xml
 
-      # --- 8. PUSH & DEPLOY (FIXED) ---
+     # --- 8. PUSH & DEPLOY ---
       - name: Push & Deploy
         shell: cmd
         env:
@@ -154,19 +154,29 @@ jobs:
           docker-compose down
           docker-compose pull
           
-          :: Start ONLY Vault and DB first
+          :: 1. Start Vault & Mongo
           docker-compose up -d vault mongodb
-          
-          :: FIX: Use PING for delay (timeout fails in CI). This waits ~15 seconds.
-          echo Waiting for Vault to initialize...
+          echo Waiting for Vault...
           ping 127.0.0.1 -n 16 > nul
           
-          :: Run the setup script
+          :: 2. Configure Vault (Generates role_id/secret_id files)
           set VAULT_ADDR=http://127.0.0.1:8200
           call setup-vault.bat
           
-          :: Now start the rest
+          :: 3. Start App & Agent
           docker-compose up -d --build backend frontend vault-agent
+          
+          :: 4. INJECT CREDENTIALS & RESTART AGENT
+          echo Injecting Credentials into Vault Agent...
+          docker cp role_id vault-agent:/vault/config/role_id
+          docker cp secret_id vault-agent:/vault/config/secret_id
+          
+          :: Restart Agent to pick up the new files and login
+          docker restart vault-agent
+          
+          :: Cleanup sensitive files from runner
+          del role_id
+          del secret_id
 
       # --- 9. CLEANUP ---
       - name: Cleanup

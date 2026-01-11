@@ -41,7 +41,7 @@ docker exec -e VAULT_TOKEN=root-token vault vault write database/roles/web-role 
 echo [6/8] Configuring AppRole Auth...
 docker exec -e VAULT_TOKEN=root-token vault vault auth enable approle
 
-:: Policy Upload (Using temp file method)
+:: Policy Upload
 echo path "database/creds/web-role" { capabilities = ["read"] } > temp_policy.hcl
 docker cp temp_policy.hcl vault:/tmp/web-policy.hcl
 docker exec -e VAULT_TOKEN=root-token vault vault policy write web-policy /tmp/web-policy.hcl
@@ -52,12 +52,12 @@ docker exec -e VAULT_TOKEN=root-token vault vault write auth/approle/role/web-ap
     token_ttl=1h ^
     token_max_ttl=4h
 
-echo [7/8] Generating Login Credentials (The Reliable Way)...
-:: 1. Generate files INSIDE the container (Linux)
-docker exec -e VAULT_TOKEN=root-token vault sh -c "vault read -field=role_id auth/approle/role/web-app-role > /tmp/role_id"
+echo [7/8] Generating Login Credentials (FIXED PATHS)...
+:: FIX: Added "/role-id" to the end of the path
+docker exec -e VAULT_TOKEN=root-token vault sh -c "vault read -field=role_id auth/approle/role/web-app-role/role-id > /tmp/role_id"
 docker exec -e VAULT_TOKEN=root-token vault sh -c "vault write -f -field=secret_id auth/approle/role/web-app-role/secret-id > /tmp/secret_id"
 
-:: 2. Copy files OUT to the Host
+:: Copy files OUT to the Host
 docker cp vault:/tmp/role_id role_id
 docker cp vault:/tmp/secret_id secret_id
 

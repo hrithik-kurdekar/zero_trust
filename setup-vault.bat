@@ -1,52 +1,58 @@
 @echo off
-echo Waiting for Vault to start...
-timeout /t 5 /nobreak >nul
+setlocal
 
-REM --- 1. Enable Database Engine ---
-echo Enabling Database Engine...
-docker exec -e VAULT_TOKEN=root-token vault vault secrets enable database
+echo ==============================================
+echo      ZERO TRUST VAULT SETUP (CI MODE)
+echo ==============================================
 
-REM --- 2. Configure MongoDB connection ---
-echo Configuring MongoDB connection...
-REM FIX: We used {{username}} and {{password}} so Vault updates the URL automatically after rotation
-docker exec -e VAULT_TOKEN=root-token vault vault write database/config/my-mongo ^
+:: Ensure we talk to localhost
+set VAULT_ADDR=http://127.0.0.1:8200
+
+echo [1/6] Waiting for Vault to be ready...
+:check_vault
+curl -s %VAULT_ADDR%/v1/sys/health >nul
+if %errorlevel% neq 0 (
+    echo    Vault not ready, retrying in 2s...
+    timeout /t 2 /nobreak >nul
+    goto check_vault
+)
+echo    Vault is UP!
+
+echo [2/6] Enabling Database Engine...
+docker exec vault vault secrets enable database
+
+echo [3/6] Configuring MongoDB connection...
+docker exec vault vault write database/config/my-mongo ^
     plugin_name=mongodb-database-plugin ^
     allowed_roles="web-role" ^
-    connection_url="mongodb://{{username}}:{{password}}@mongodb:27017/admin" ^
+    connection_url="mongodb://{{username}}:{{password}}@mongodb:27017/admin?ssl=false" ^
     username="admin" ^
     password="initial_bootstrap_password"
 
-REM --- 3. Rotate Root Password ---
-echo ROTATING ROOT PASSWORD...
-docker exec -e VAULT_TOKEN=root-token vault vault write -force database/rotate-root/my-mongo
+echo [4/6] ROTATING ROOT PASSWORD (Zero Trust)...
+docker exec vault vault write -force database/rotate-root/my-mongo
 
-REM --- 4. Create Role ---
-echo Creating web-role...
-docker exec -e VAULT_TOKEN=root-token vault vault write database/roles/web-role ^
+echo [5/6] Creating Application Role...
+docker exec vault vault write database/roles/web-role ^
     db_name=my-mongo ^
-    creation_statements="{ \"db\": \"admin\", \"roles\": [{ \"role\": \"readWrite\", \"db\": \"test_db\" }] }" ^
-    default_ttl="5m" ^
-    max_ttl="1h"
+    creation_statements="{\"db\": \"test_db\", \"roles\": [{\"role\": \"readWrite\"}]}" ^
+    default_ttl="1h" ^
+    max_ttl="24h"
 
-REM --- 5. Enable AppRole ---
-echo Enabling AppRole...
-docker exec -e VAULT_TOKEN=root-token vault vault auth enable approle
-
-REM --- 6. Create Policy ---
-echo Creating Policy...
-echo path "database/creds/web-role" { capabilities = ["read"] } | docker exec -i -e VAULT_TOKEN=root-token vault vault policy write web-policy -
-
-REM --- 7. Create AppRole ---
-echo Creating AppRole...
-docker exec -e VAULT_TOKEN=root-token vault vault write auth/approle/role/web-app-role ^
+echo [6/6] Configuring AppRole Auth...
+docker exec vault vault auth enable approle
+docker exec vault vault policy write web-policy - <<EOF
+path "database/creds/web-role" {
+  capabilities = ["read"]
+}
+EOF
+docker exec vault vault write auth/approle/role/web-app-role ^
     token_policies="web-policy" ^
-    token_ttl=1h
+    token_ttl=1h ^
+    token_max_ttl=4h
 
-REM --- 8. Generate Credentials ---
-echo Generating AppRole Credentials...
-docker exec -e VAULT_TOKEN=root-token vault vault read -field=role_id auth/approle/role/web-app-role/role-id > backend\role_id
-docker exec -e VAULT_TOKEN=root-token vault vault write -f -field=secret_id auth/approle/role/web-app-role/secret-id > backend\secret_id
-
-echo Setup Complete! Restarting services...
-docker restart vault-agent backend
-pause
+echo.
+echo ==============================================
+echo      SETUP COMPLETE
+echo ==============================================
+:: Removed 'pause' so CI doesn't hang

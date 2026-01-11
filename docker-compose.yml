@@ -36,15 +36,22 @@ services:
 
   vault-agent:
     image: hashicorp/vault:latest
-    container_name: vault-agent
+    container_name: vault-agent  # <--- FORCE NAME
     restart: always
     depends_on:
       - vault
     volumes:
-      - ./backend/agent-config.hcl:/etc/vault/config.hcl
-      - ./backend:/app/auth
-      - shared-secrets:/app/secrets
-    entrypoint: vault agent -config=/etc/vault/config.hcl
+      # Mount the config
+      - ./backend/agent-config.hcl:/vault/config/agent-config.hcl
+      # Mount the Shared Volume (Where creds go)
+      - shared-secrets:/vault/secrets
+      # MOUNT THE CREDENTIALS (Host -> Container)
+      - ./role_id:/vault/config/role_id
+      - ./secret_id:/vault/config/secret_id
+    entrypoint:
+      - vault
+      - agent
+      - -config=/vault/config/agent-config.hcl
 
   frontend:
     build: ./frontend

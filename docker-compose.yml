@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      # This password will be invalidated/rotated immediately by our script
+      MONGO_INITDB_ROOT_PASSWORD: initial_bootstrap_password
+    ports:
+      - "27017:27017"
+
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "root-token"
+      VAULT_ADDR: "http://0.0.0.0:8200"
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+
+  backend:
+    build: ./backend
+    container_name: backend
+    restart: always
+    volumes:
+      - shared-secrets:/app/secrets
+    depends_on:
+      - vault
+      - mongodb
+    ports:
+      - "8000:8000"
+
+  vault-agent:
+    image: hashicorp/vault:latest
+    container_name: vault-agent
+    restart: always
+    depends_on:
+      - vault
+    volumes:
+      - ./backend/agent-config.hcl:/etc/vault/config.hcl
+      - ./backend:/app/auth
+      - shared-secrets:/app/secrets
+    entrypoint: vault agent -config=/etc/vault/config.hcl
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    environment:
+      - CI=true
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  shared-secrets:
